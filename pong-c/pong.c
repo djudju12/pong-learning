@@ -3,18 +3,39 @@
 #include <SDL2/SDL2_gfxPrimitives.h>
 #include <SDL2/SDL_image.h>
 
-#define WIDTH 640
-#define HEIGTH 640
-#define VEL_PAD_Y 10
+#define WIDTH 800
+#define HEIGTH 800
+#define VEL_PAD_Y 15
+#define Z_FACTOR 8
 
-int checkError(int code, char *msg)
+int check_error(int code, char *msg)
 {
     if (code != 0)
         printf("ERROR: %s", msg);
     return code;
 }
 
-int drawCircle(SDL_Renderer *renderer, int x, int y, int radius)
+
+int draw_thick_line(SDL_Renderer *renderer, int thickness) {
+    int center = WIDTH/2;
+
+    int status;
+    for (size_t i = center-thickness; i < center; i++)
+    {
+        status = SDL_RenderDrawLine(renderer, i, 0, i, HEIGTH);
+        if (status != 0)  return status;
+    }
+    
+    for (size_t i = center+thickness; i > center; i--)
+    {
+        status = SDL_RenderDrawLine(renderer, i, 0, i, HEIGTH);
+        if (status != 0)  return status;
+    }
+
+    return SDL_RenderDrawLine(renderer, WIDTH/2, 0, WIDTH/2, HEIGTH);
+}
+
+int draw_circle(SDL_Renderer *renderer, int x, int y, int radius)
 {
     SDL_Point points[256];
     int pointCount = 0;
@@ -73,12 +94,12 @@ int drawCircle(SDL_Renderer *renderer, int x, int y, int radius)
     return status;
 }
 
-int drawFilledCircle(SDL_Renderer *renderer, int x, int y, int radius)
+int draw_filled_circle(SDL_Renderer *renderer, int x, int y, int radius)
 {
     int status = 0;
     for (size_t i = 0; i <= radius; i++)
     {
-        status = drawCircle(renderer, x, y, i);
+        status = draw_circle(renderer, x, y, i);
         if (status != 0)
             break;
     }
@@ -86,7 +107,7 @@ int drawFilledCircle(SDL_Renderer *renderer, int x, int y, int radius)
     return status;
 }
 
-void movePlayer(SDL_Rect *rect, int amount)
+void move_player(SDL_Rect *rect, int amount)
 {
     if (amount < 0)
     {
@@ -106,15 +127,93 @@ void movePlayer(SDL_Rect *rect, int amount)
 
 typedef struct
 {
-    int x_center;
-    int y_center;
+    int x_center, y_center;
+    int x_vel, y_vel;
     int radius;
 } Ball;
 
-void moveBall(Ball *ball, int x_vel, int y_vel)
+void calc_vel(Ball *ball, SDL_Rect *player) 
 {
-    ball->x_center = ball->x_center + x_vel;
-    ball->y_center = ball->y_center + y_vel;
+    int pad_center_y = player->y + player->h/2;
+    float y_factor = abs(ball->y_center - pad_center_y)/100.0;       // if center pad == ball->y_center so y_vel == 0% of FACTOR_Z 
+    float x_factor = 1 - (abs(ball->y_center - pad_center_y)/100.0); // if  center pad == ball->y_center so y_vel == 100% of FACTOR_Z
+
+    if (player->x == 0) 
+    {
+        ball->x_vel = (Z_FACTOR*x_factor) + 1;
+        if (ball->x_vel == 0) ball->x_vel = 1;
+    } 
+    else 
+    {
+        ball->x_vel = -(Z_FACTOR*x_factor + 1);
+        if (ball->x_vel == 0) ball->x_vel = -1;
+    }
+
+    if (ball->y_center > pad_center_y) ball->y_vel = Z_FACTOR*y_factor;
+    else ball->y_vel = -Z_FACTOR*y_factor;
+
+}
+
+void move_ball(Ball *ball, SDL_Rect *player1, SDL_Rect *player2)
+{
+    // point player 1
+    if ((WIDTH - ball->x_center) <= ball->radius)
+    {
+        ball->x_center = WIDTH / 2;
+        ball->y_center = HEIGTH / 2;
+        return;
+    }
+
+    // point player 2
+    if (ball->x_center <= ball->radius)
+    {
+        ball->x_center = WIDTH / 2;
+        ball->y_center = HEIGTH / 2;
+        return;
+    }
+
+    // if hit player 1
+    if (((ball->x_center - player1->w) <= ball->radius) && 
+         (ball->x_vel < 0))
+    {
+        if ((ball->y_center + ball->radius >= player1->y) && 
+            (ball->y_center - ball->radius <= player1->y + player1->h)) 
+        {
+            calc_vel(ball, player1);
+            return;
+        }
+    }
+
+    // if hit player 2
+    if (((WIDTH - ball->x_center - player2->w) <= ball->radius) && 
+        (ball->x_vel > 0))
+    {
+        if ((ball->y_center + ball->radius >= player2->y) && 
+            (ball->y_center - ball->radius <= player2->y + player2->h)) 
+        {
+            calc_vel(ball, player2);
+            return;
+        }
+    }
+
+    // if hit roof 
+    if (ball->y_center <= ball->radius)
+    {
+        ball->y_center += ball->radius;
+        ball->y_vel = -ball->y_vel;
+        return;
+    }
+
+    // if hit ceil 
+    if ((HEIGTH - ball->y_center) <= ball->radius)
+    {
+        ball->y_center -= ball->radius;
+        ball->y_vel = -ball->y_vel;
+        return;
+    }
+
+    ball->x_center = ball->x_center + ball->x_vel;
+    ball->y_center = ball->y_center + ball->y_vel;
 }
 
 int main(void)
@@ -144,23 +243,22 @@ int main(void)
 
     SDL_Rect player1 = {
         .h = HEIGTH * 0.3,
-        .w = WIDTH * 0.05,
+        .w = WIDTH * 0.03,
         .x = 0,
         .y = HEIGTH / 2};
 
     SDL_Rect player2 = {
         .h = HEIGTH * 0.3,
-        .w = WIDTH * 0.05,
-        .x = WIDTH - WIDTH * 0.05,
+        .w = WIDTH * 0.03,
+        .x = WIDTH - WIDTH * 0.03,
         .y = HEIGTH / 2};
-
-    int vel_ball_x = 2;
-    int vel_ball_y = 3;
 
     Ball ball = {
         .x_center = WIDTH / 2,
         .y_center = HEIGTH / 2,
-        .radius = 10};
+        .radius = 10,
+        .x_vel = Z_FACTOR/2,
+        .y_vel = Z_FACTOR/2};
 
     int err = 0;
     Uint32 lastUpdate = SDL_GetTicks();
@@ -182,21 +280,21 @@ int main(void)
                     break;
 
                 case SDLK_DOWN:
-                    movePlayer(&player1, +VEL_PAD_Y);
+                    move_player(&player1, +VEL_PAD_Y);
                     break;
 
                 case SDLK_UP:
-                    movePlayer(&player1, -VEL_PAD_Y);
+                    move_player(&player1, -VEL_PAD_Y);
                     break;
 
                 case SDLK_s:
-                    movePlayer(&player2, +VEL_PAD_Y);
+                    move_player(&player2, +VEL_PAD_Y);
                     break;
 
                 case SDLK_w:
-                    movePlayer(&player2, -VEL_PAD_Y);
+                    move_player(&player2, -VEL_PAD_Y);
                     break;
-
+                
                 default:
                     break;
                 }
@@ -209,28 +307,32 @@ int main(void)
         now = SDL_GetTicks();
         if (now > (lastUpdate + 1000 / 60))
         {
-            err = checkError(SDL_SetRenderDrawColor(renderer, 18, 18, 18, 255), "SDL_SetRenderDrawColor BACKGROUND");
+            err = check_error(SDL_SetRenderDrawColor(renderer, 18, 18, 18, 255), "SDL_SetRenderDrawColor BACKGROUND");
             if (err != 0)
                 break;
 
-            err = checkError(SDL_RenderClear(renderer), "SDL_RenderClear");
+            err = check_error(SDL_RenderClear(renderer), "SDL_RenderClear");
             if (err != 0)
                 break;
 
-            err = checkError(SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255), "SDL_SetRenderDrawColor WHITE");
+            err = check_error(SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255), "SDL_SetRenderDrawColor WHITE");
             if (err != 0)
                 break;
 
-            moveBall(&ball, vel_ball_x, vel_ball_y);
-            err = checkError(drawFilledCircle(renderer, ball.x_center, ball.y_center, ball.radius), "draw ball");
+            err = check_error(draw_thick_line(renderer, 3), "drawning line in the center");
             if (err != 0)
                 break;
 
-            err = checkError(SDL_RenderFillRect(renderer, &player1), "Player1");
+            move_ball(&ball, &player1, &player2);
+            err = check_error(draw_filled_circle(renderer, ball.x_center, ball.y_center, ball.radius), "draw ball");
             if (err != 0)
                 break;
 
-            err = checkError(SDL_RenderFillRect(renderer, &player2), "Player2");
+            err = check_error(SDL_RenderFillRect(renderer, &player1), "Player1");
+            if (err != 0)
+                break;
+
+            err = check_error(SDL_RenderFillRect(renderer, &player2), "Player2");
             if (err != 0)
                 break;
 
